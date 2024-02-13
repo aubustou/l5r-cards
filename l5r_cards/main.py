@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Required, TypedDict
 
@@ -10,10 +11,25 @@ import lxml.etree as ET
 
 logger = logging.getLogger(__name__)
 
+UNIQUE_TYPES = {"event", "stronghold", "wind", "sensei"}
+UNIQUE_KEYWORD = "Unique</b>"
+
+DYNASTY_TYPES = {
+    "event",
+    "holding",
+    "personality",
+    "celestial",
+    "region",
+    "wind",
+}
+FATE_TYPES = {"spell", "strategy", "ancestor", "ring", "sensei", "follower", "item"}
+STRONGHOLD_TYPES = {"stronghold"}
+
 
 class Card(TypedDict, total=False):
     id: Required[str]
     name: Required[str]
+    type: Required[str]
     rarity: str
     edition: str
     image: str
@@ -21,6 +37,7 @@ class Card(TypedDict, total=False):
     text: str
     cost: str
     focus: str
+    images: dict[str, Path]
 
 
 def load_xml_database(path: Path) -> dict[str, Card]:
@@ -59,6 +76,11 @@ def load_xml_database(path: Path) -> dict[str, Card]:
         card_dict[name] = {
             "id": card_id,
             "name": name,
+            "type": card.attrib["type"],
+            "images": {
+                x.attrib["edition"]: Path(x.text) for x in card.findall("image")
+            },
+            "text": card.find("text").text,
         }
 
     return card_dict
@@ -111,10 +133,96 @@ def load_deck(path: Path, cards: dict[str, Card]) -> list[Card]:
     return deck
 
 
+def sanitize_name(name: str) -> str:
+    for char in ':/"?*<>|\\':
+        name = name.replace(char, "-")
+
+    return name
+
+
+# The Hidden School of the Scorpion (1)
+STRONGHOLD_NAME_PATTERN = re.compile(r"(.+) \((\d)\)")
+
+
+def rename_images(
+    cards: dict[str, Card], input_path: Path, back_dynasty: Path, back_fate: Path
+):
+    card_images = {
+        x.stem: card for card in cards.values() for x in card["images"].values()
+    }
+
+    output_path = input_path.with_stem(input_path.stem + "_output")
+    output_path.mkdir(exist_ok=True)
+
+    number_of_cards = {"dynasty": 0, "fate": 0, "stronghold": 0}
+
+    for image in input_path.rglob("*.jpg"):
+        image_name = image.with_stem(image.stem.removesuffix("_upscaled")).stem
+        if (card := card_images.get(image_name)) is None:
+            logger.warning("Card not found for %s", image_name)
+            continue
+
+        if card["type"] in UNIQUE_TYPES:
+            card_number = 1
+        else:
+            if UNIQUE_KEYWORD in card["text"]:
+                card_number = 1
+            elif "Unique" in card["text"]:
+                logger.info("Is this card unique? %s", card["name"])
+                card_number = int(input(f"{card['text']}"))
+            else:
+                card_number = 3
+
+        card_id = card["id"]
+        card_name = card["name"]
+
+        orientation = "face"
+        if card["type"] in DYNASTY_TYPES:
+            back = back_dynasty
+            number_of_cards["dynasty"] += card_number
+        elif card["type"] in FATE_TYPES:
+            back = back_fate
+            number_of_cards["fate"] += card_number
+        elif card["type"] in STRONGHOLD_TYPES:
+            back = None
+            if (group := STRONGHOLD_NAME_PATTERN.match(card_name).group(1)) is None:
+                raise ValueError(f"Invalid stronghold name: {card_name}")
+            card_name = group
+
+            if card["id"].endswith("b"):
+                orientation = "back"
+                card_id = card_id.removesuffix("b")
+            else:
+                number_of_cards["stronghold"] += card_number
+        else:
+            raise ValueError(f"Unknown card type: {card['type']}")
+
+        new_name = sanitize_name(
+            f"{card_id} - {card_name}[{orientation},{card_number}].jpg"
+        )
+
+        logger.info("Renaming %s to %s", image, new_name)
+        # new_file.write_bytes(image.read_bytes())
+
+        if back is None:
+            continue
+
+        new_back_name = sanitize_name(
+            f"{card_id} - {card_name}[back,{card_number}].jpg"
+        )
+        logger.info("Copying %s to %s", back, new_back_name)
+        # (output_path / new_back_name).write_bytes(back.read_bytes())
+
+    logger.info("Number of cards: %s", number_of_cards)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("path", type=Path)
+    parser.add_argument("--path", type=Path)
     parser.add_argument("--database", "-d", type=Path, default=Path("database.xml"))
+    parser.add_argument("--rename", "-r", action="store_true")
+    parser.add_argument("--back-dynasty", type=Path)
+    parser.add_argument("--back-fate", type=Path)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG)
@@ -123,12 +231,20 @@ def main():
 
     input_path = args.path
 
-    deck = load_deck(input_path, cards)
+    if args.rename:
+        if not (back_dynasty := args.back_dynasty):
+            raise ValueError("Back dynasty not set")
+        if not (back_fate := args.back_fate):
+            raise ValueError("Back fate not set")
 
-    output = input_path.with_stem(input_path.stem + "_output")
-    output.write_text("\n".join(sorted([card["id"] for card in deck])))
-    for card in deck:
-        logger.info("%s - %s", card["id"], card["name"])
+        rename_images(cards, input_path, back_dynasty, back_fate)
+    else:
+        deck = load_deck(input_path, cards)
+
+        output = input_path.with_stem(input_path.stem + "_output")
+        output.write_text("\n".join(sorted([card["id"] for card in deck])))
+        for card in deck:
+            logger.info("%s - %s", card["id"], card["name"])
 
 
 if __name__ == "__main__":
