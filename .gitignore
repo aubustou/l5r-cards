@@ -1,12 +1,4 @@
 /.mypy_cache
 /.venv
 /database.xml
-/deck.txt
-/PX_RtR_2nd_Chikenlightenment_by_Isawa_Jim.txt
-/PX_RtR_2nd_Chikenlightenment_by_Isawa_Jim_output.txt
-/PX_RtR_Top_4_Everything_Burns_by_Mitsu_Hinosai (1).txt
-/PX_RtR_Top_4_Everything_Burns_by_Mitsu_Hinosai (1)_output.txt
-/SC_RtR_1st_Dishonor_by_OniNoEl (1).txt
-/SC_RtR_1st_Dishonor_by_OniNoEl (1)_output.txt
-/SP_RtR_Top_4_The_Snake_Strikes_by_Shiba_Kanzen (1).txt
-/SP_RtR_Top_4_The_Snake_Strikes_by_Shiba_Kanzen (1)_output.txt
+*.txt

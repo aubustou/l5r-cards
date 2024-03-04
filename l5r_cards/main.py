@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Required, TypedDict
 
@@ -223,6 +224,7 @@ def main():
     parser.add_argument("--rename", "-r", action="store_true")
     parser.add_argument("--back-dynasty", type=Path)
     parser.add_argument("--back-fate", type=Path)
+    parser.add_argument("--image-folder", type=Path, default=Path("images"))
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG)
@@ -245,6 +247,38 @@ def main():
         output.write_text("\n".join(sorted([card["id"] for card in deck])))
         for card in deck:
             logger.info("%s - %s", card["id"], card["name"])
+
+        if image_folder := args.image_folder:
+            output_image_folder = image_folder / "Decks" / input_path.stem
+            output_image_folder.mkdir(exist_ok=True, parents=True)
+
+            for card in deck:
+                if not (path := lookup_card(card, image_folder)):
+                    continue
+                i = 1
+                output_image_path = output_image_folder / path.name
+                while output_image_path.exists():
+                    logger.warning("File already exists: %s", output_image_path)
+                    output_image_path = output_image_path.with_stem(path.stem + f"_{i}")
+                    i += 1
+
+                shutil.copy(path, output_image_path)
+
+
+def lookup_card(card: Card, image_folder: Path) -> Path | None:
+    found = list(
+        x
+        for x in image_folder.rglob(f"{card['id']}.*")
+        if image_folder / "Decks" not in x.parents
+    )
+    if not found:
+        logger.warning("Card not found: %s", card["id"])
+        return None
+    if len(found) > 1:
+        logger.warning("Multiple cards found: %s", found)
+        return None
+    else:
+        return found[0]
 
 
 if __name__ == "__main__":
